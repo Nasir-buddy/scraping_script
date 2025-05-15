@@ -30,7 +30,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .lean();
 
     res.status(200).json({ comparisons });
-  } catch (error) {
+  } catch (error: unknown) {
+    console.error('Error fetching page comparisons:', error);
     res.status(500).json({ error: 'Failed to fetch page comparisons' });
   }
 } 

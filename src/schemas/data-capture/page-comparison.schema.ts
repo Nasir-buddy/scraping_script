@@ -1,6 +1,32 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { ScrapedContentType } from './scraped-content.schema';
 import { ArrayDiffResult } from '../../pages/platform/datacapture/script/utils/compare-content';
+
+export interface SeoMetadataType {
+  changed: boolean;
+  metaKeywords?: { changed: boolean; previous: string; current: string };
+  canonicalUrl?: { changed: boolean; previous: string; current: string };
+  openGraph?: { changed: boolean; previous: Record<string, string>; current: Record<string, string> };
+  twitterCard?: { changed: boolean; previous: Record<string, string>; current: Record<string, string> };
+  structuredData?: { changed: boolean; previous: string[]; current: string[] };
+  robotsMeta?: { changed: boolean; previous: string; current: string };
+}
+
+export interface PerformanceMetricsType {
+  changed: boolean;
+  pageLoadTimeMs?: { changed: boolean; previous: number; current: number };
+  coreWebVitals?: { changed: boolean; previous: Record<string, number>; current: Record<string, number> };
+  pageSpeed?: { changed: boolean; previous: number; current: number };
+}
+
+export interface SecurityAndAccessibilityType {
+  changed: boolean;
+  security?: { 
+    changed: boolean; 
+    isHttps: { changed: boolean; previous: boolean | null; current: boolean | null };
+    hasMixedContent: { changed: boolean; previous: boolean | null; current: boolean | null };
+  };
+  accessibility?: { changed: boolean; previous: Record<string, boolean>; current: Record<string, boolean> };
+}
 
 export interface PageComparisonType extends Document {
   url: string;
@@ -24,9 +50,9 @@ export interface PageComparisonType extends Document {
     externalLinks: ArrayDiffResult<string>;
     structuredData: ArrayDiffResult<string>;
     breadcrumbs: ArrayDiffResult<string>;
-    seoMetadata: any;
-    performanceMetrics: any;
-    securityAndAccessibility: any;
+    seoMetadata: SeoMetadataType;
+    performanceMetrics: PerformanceMetricsType;
+    securityAndAccessibility: SecurityAndAccessibilityType;
   };
   changeScore: number;
   createdAt: Date;
