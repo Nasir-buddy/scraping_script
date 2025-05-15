@@ -55,6 +55,11 @@ async function runEnhancedScraper(): Promise<void> {
 
     console.log(`Found ${urlMap.size} unique URLs to scrape.`);
 
+    // Add retry mechanism with backoff
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryDelay = 5000; // 5 seconds
+    
     for (const [url, { entryId, formId }] of Array.from(urlMap.entries())) {
       // Use 1-minute granularity for scrapeDate (YYYY-MM-DDTHH:MM)
       const now = new Date();
@@ -63,110 +68,26 @@ async function runEnhancedScraper(): Promise<void> {
 
       try {
         console.log(`Processing URL: ${url} from entry ${entryId}`);
-
-        // Create or update the scraped content record for this 1-minute window
+        const scrapedData = await scrapeEnhancedSeoData(url);
+        
+        // Save the successful data to database
         await ScrapedContentModel.findOneAndUpdate(
           { formId, url, scrapeDate },
           {
-            status: 'pending',
+            data: sanitizeMapKeys(scrapedData),
+            status: 'completed',
             lastScraped: new Date(),
             formId,
             url,
             scrapeDate
           },
-          { upsert: true, new: true }
+          { upsert: true }
         );
-
-        // Use the advanced scraper
-        console.log(`Scraping URL: ${url}`);
-        const scrapedData: EnhancedScrapedData = await scrapeEnhancedSeoData(url);
-
-        // Extract data from scraped results
-        const {
-          title,
-          metaDescription: description,
-          headings: allHeadings,
-          mainHeadings,
-          testimonials,
-          internalLinks,
-          externalLinks,
-          imageAlts
-        } = scrapedData;
-
-        // Prepare data for storage
-        const headings = [...(mainHeadings || []), ...(allHeadings?.map((h: { tag: string; text: string }) => h.text) || [])];
-        const paragraphs = testimonials || [];
-        const images = imageAlts?.map((img: { src: string; alt: string }) => img.src) || [];
-        const links = [...(internalLinks || []), ...(externalLinks || [])];
-
-        // Update the scraped content record with the results for this 1-minute window
-        console.log(`Saving scraped data to MongoDB for URL: ${url}`);
         
-        // Log that we're storing screenshot as base64 only
-        if (scrapedData.screenshotBase64) {
-          console.log(`Screenshot captured as base64 for URL: ${url} (${scrapedData.screenshotBase64.length} characters)`);
-        } else {
-          console.log(`No screenshot captured for URL: ${url}`);
-        }
-        
-        await ScrapedContentModel.findOneAndUpdate(
-          { formId, url, scrapeDate },
-          {
-            title,
-            description,
-            headings,
-            paragraphs,
-            images,
-            links,
-            status: 'success',
-            lastScraped: new Date(),
-            formId,
-            url,
-            scrapeDate,
-            // Include all enhanced SEO data
-            metaKeywords: scrapedData.metaKeywords,
-            canonicalUrl: scrapedData.canonicalUrl,
-            openGraph: scrapedData.openGraph,
-            twitterCard: scrapedData.twitterCard,
-            structuredData: scrapedData.structuredData,
-            robotsMeta: scrapedData.robotsMeta,
-            favicon: scrapedData.favicon,
-            alternateHreflangs: scrapedData.alternateHreflangs,
-            mainHeadings: scrapedData.mainHeadings,
-            heroImage: scrapedData.heroImage,
-            testimonials: scrapedData.testimonials,
-            pricing: scrapedData.pricing,
-            ctaElements: scrapedData.ctaElements,
-            internalLinks: scrapedData.internalLinks,
-            externalLinks: scrapedData.externalLinks,
-            imageAlts: scrapedData.imageAlts,
-            pageLoadTimeMs: scrapedData.pageLoadTimeMs,
-            statusCode: scrapedData.statusCode,
-            sitemapUrls: scrapedData.sitemapUrls,
-            robotsTxt: scrapedData.robotsTxt,
-            wordCount: scrapedData.wordCount,
-            textToHtmlRatio: scrapedData.textToHtmlRatio,
-            metaRobotsTags: scrapedData.metaRobotsTags,
-            urlAnalysis: scrapedData.urlAnalysis,
-            parsedSchemaTypes: scrapedData.parsedSchemaTypes,
-            linkAnalysis: scrapedData.linkAnalysis,
-            imageAnalysis: scrapedData.imageAnalysis,
-            security: scrapedData.security,
-            accessibility: scrapedData.accessibility,
-            pagination: scrapedData.pagination,
-            breadcrumbs: scrapedData.breadcrumbs,
-            coreWebVitals: scrapedData.coreWebVitals,
-            keywordDensity: scrapedData.keywordDensity,
-            pageSpeed: scrapedData.pageSpeed,
-            screenshotPath: scrapedData.screenshotPath,
-            screenshotBase64: scrapedData.screenshotBase64
-          },
-          { upsert: true, new: true }
-        );
-
-        console.log(`Successfully scraped URL: ${url}`);
       } catch (error) {
         console.error(`Error scraping URL ${url}:`, error);
+        
+        // Save error information to database
         await ScrapedContentModel.findOneAndUpdate(
           { formId, url, scrapeDate },
           {
@@ -179,10 +100,28 @@ async function runEnhancedScraper(): Promise<void> {
           },
           { upsert: true }
         );
+        
+        // Implement retry with exponential backoff
+        if (retryCount < maxRetries) {
+          retryCount++;
+          const backoffTime = retryDelay * Math.pow(2, retryCount - 1);
+          console.log(`Retrying in ${backoffTime / 1000} seconds... (Attempt ${retryCount} of ${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          // Continue to the next URL instead of retrying the same one
+          // to avoid getting blocked by the site
+        } else {
+          console.error(`Max retries reached for URL ${url}, skipping...`);
+          retryCount = 0; // Reset for next URL
+        }
       }
+      
+      // Add delay between requests to avoid triggering anti-scraping measures
+      const randomDelay = 3000 + Math.floor(Math.random() * 5000); // 3-8 seconds
+      console.log(`Waiting ${randomDelay / 1000} seconds before next request...`);
+      await new Promise(resolve => setTimeout(resolve, randomDelay));
     }
   } catch (error) {
-    console.error('Error running enhanced scraper:', error);
+    console.error("Fatal error in enhanced scraper job:", error);
   } finally {
     isRunning = false;
     // Don't disconnect from mongoose or exit process when using cron

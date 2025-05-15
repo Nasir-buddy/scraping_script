@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer';
 import * as cheerio from 'cheerio';
 import axios from 'axios';
+import type { HTTPResponse } from 'puppeteer';
 
 interface ScrapedData {
   url: string;
@@ -360,6 +361,7 @@ export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrape
   
   const timestamp = new Date().toISOString();
   const startTime = Date.now();
+  let pageResponse: HTTPResponse | null = null;
   
   // Initialize a browser instance
   console.log(`📊 Launching headless browser...`);
@@ -379,18 +381,42 @@ export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrape
     
     // Navigate to the URL
     console.log(`📊 Navigating to URL: ${url}`);
-    const response = await page.goto(url, { waitUntil: 'networkidle2' });
-    
-    if (!response) {
-      throw new Error(`Failed to load ${url}`);
+    try {
+      // Increase timeout to 60 seconds
+      pageResponse = await page.goto(url, { 
+        waitUntil: 'networkidle2',
+        timeout: 60000 // 60 seconds instead of default 30
+      });
+      
+      if (!pageResponse) {
+        throw new Error(`Failed to load ${url}`);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(`⚠️ Navigation issue with ${url}: ${errorMessage}`);
+      // Add retry logic
+      console.log(`🔄 Retrying navigation to ${url}...`);
+      try {
+        pageResponse = await page.goto(url, { 
+          waitUntil: 'domcontentloaded', // Less strict wait condition
+          timeout: 90000 // 90 seconds for retry
+        });
+        
+        if (!pageResponse) {
+          throw new Error(`Failed to load ${url} on retry`);
+        }
+      } catch (retryError: unknown) {
+        const retryErrorMessage = retryError instanceof Error ? retryError.message : String(retryError);
+        throw new Error(`Failed to navigate to ${url} after retry: ${retryErrorMessage}`);
+      }
     }
     
-    console.log(`📊 Page loaded successfully with status: ${response.status()}`);
-    const statusCode = response.status();
+    console.log(`📊 Page loaded successfully with status: ${pageResponse.status()}`);
+    const statusCode = pageResponse.status();
     const headers: Record<string, string> = {};
     
     // Extract headers
-    const responseHeaders = response.headers();
+    const responseHeaders = pageResponse.headers();
     Object.keys(responseHeaders).forEach(key => {
       headers[key] = responseHeaders[key];
     });
@@ -513,13 +539,19 @@ export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrape
     if (sitemapUrls.length === 0) {
       // If no sitemap found in robots.txt, try the common locations
       try {
-        const sitemapUrl = new URL('/sitemap.xml', url).href;
-        const sitemapResponse = await axios.head(sitemapUrl, { timeout: 5000 });
+        // Attempt to fetch sitemap, but don't fail if not found
+        const sitemapResponse = await axios.head(`${url}/sitemap.xml`, { timeout: 5000 });
         if (sitemapResponse.status === 200) {
-          sitemapUrls.push(sitemapUrl);
+          console.log(`✅ Found sitemap.xml for ${url}`);
+          sitemapUrls.push(`${url}/sitemap.xml`);
+          // Process sitemap logic...
+        } else {
+          console.log(`ℹ️ No sitemap.xml found for ${url}, continuing with direct scraping`);
         }
-      } catch (error) {
-        console.warn(`⚠️ Could not find sitemap.xml for ${url}:`, error);
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.log(`ℹ️ No sitemap.xml found for ${url}, continuing with direct scraping: ${errorMessage}`);
+        // Don't throw error, just continue with the rest of the scraping
       }
     }
     console.log(`📊 Found ${sitemapUrls.length} sitemap URLs`);
