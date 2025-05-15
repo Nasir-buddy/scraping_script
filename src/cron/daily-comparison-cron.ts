@@ -13,11 +13,11 @@
 console.log('Starting daily landing page comparison cron job...');
 
 import path from 'path';
-import mongoose from 'mongoose';
-// @ts-ignore
+import mongoose, { Schema } from 'mongoose';
+// No types for node-cron
 import cron from 'node-cron';
 import dotenv from 'dotenv';
-import { compareScrapedContent } from '../pages/platform/datacapture/script/utils/compare-content';
+import { compareScrapedContent, ArrayDiffResult } from '../pages/platform/datacapture/script/utils/compare-content';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 
@@ -29,20 +29,71 @@ import PageComparisonModel from '../schemas/data-capture/page-comparison.schema'
 
 interface Form {
   _id: mongoose.Types.ObjectId;
-  url?: string;
-  url2?: string;
-  [key: string]: any;
+  url?: string[];
+  url2?: string[];
+  [key: string]: unknown;
 }
 
+// Define type to match compareScrapedContent return type
+type ComparisonReturn = {
+  url: string;
+  currentDate: Date;
+  previousDate: Date;
+  currentContentId: Schema.Types.ObjectId;
+  previousContentId: Schema.Types.ObjectId;
+  hasChanges: boolean;
+  changes: {
+    title: { changed: boolean; previous: string; current: string };
+    description: { changed: boolean; previous: string; current: string };
+    headings: ArrayDiffResult<string>;
+    mainHeadings: ArrayDiffResult<string>;
+    testimonials: ArrayDiffResult<string>;
+    ctaElements: ArrayDiffResult<string>;
+    pricing: { changed: boolean; details: string };
+    imageChanges: ArrayDiffResult<string>;
+    favicon: { changed: boolean; previous: string; current: string };
+    heroImage: { changed: boolean; previous: string; current: string };
+    internalLinks: ArrayDiffResult<string>;
+    externalLinks: ArrayDiffResult<string>;
+    structuredData: ArrayDiffResult<string>;
+    breadcrumbs: ArrayDiffResult<string>;
+    seoMetadata: {
+      changed: boolean;
+      metaKeywords?: { changed: boolean; previous: string; current: string };
+      canonicalUrl?: { changed: boolean; previous: string; current: string };
+      openGraph?: { changed: boolean; previous: Record<string, string>; current: Record<string, string> };
+      twitterCard?: { changed: boolean; previous: Record<string, string>; current: Record<string, string> };
+      structuredData?: { changed: boolean; previous: string[]; current: string[] };
+      robotsMeta?: { changed: boolean; previous: string; current: string };
+    };
+    performanceMetrics: {
+      changed: boolean;
+      pageLoadTimeMs?: { changed: boolean; previous: number; current: number };
+      coreWebVitals?: { changed: boolean; previous: Record<string, number>; current: Record<string, number> };
+      pageSpeed?: { changed: boolean; previous: number; current: number };
+    };
+    securityAndAccessibility: {
+      changed: boolean;
+      security?: { 
+        changed: boolean; 
+        isHttps: { changed: boolean; previous: boolean | null; current: boolean | null };
+        hasMixedContent: { changed: boolean; previous: boolean | null; current: boolean | null };
+      };
+      accessibility?: { changed: boolean; previous: Record<string, boolean>; current: Record<string, boolean> };
+    };
+  };
+  changeScore: number;
+};
+
 // Helper to recursively filter only changed fields in the comparison result
-function filterChangedFields(comparison: any): any {
-  function filter(obj: any): any {
+function filterChangedFields(comparison: ComparisonReturn): ComparisonReturn {
+  function filter(obj: unknown): unknown {
     if (Array.isArray(obj)) return obj;
     if (obj && typeof obj === 'object') {
       // If this object has a 'changed' property and it's false, skip it
       if ('changed' in obj && obj.changed === false) return undefined;
       // If this object has a 'changed' property and it's true, filter its children
-      const result: Record<string, any> = {};
+      const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj)) {
         if (key === 'changed' || key === 'previous' || key === 'current' || key === 'details') {
           result[key] = value;
@@ -56,21 +107,24 @@ function filterChangedFields(comparison: any): any {
     return obj;
   }
 
-  const filteredChanges: Record<string, any> = {};
-  for (const [key, value] of Object.entries(comparison.changes || {})) {
+  // Copy the comparison object to avoid mutating the original
+  const filteredComparison = { ...comparison };
+  const filteredChanges = { ...comparison.changes };
+  
+  // Filter each change property
+  for (const [key, value] of Object.entries(filteredChanges)) {
     const filtered = filter(value);
-    if (filtered !== undefined) filteredChanges[key] = filtered;
+    if (filtered === undefined) {
+      // @ts-expect-error - Dynamic deletion
+      delete filteredChanges[key];
+    } else {
+      // @ts-expect-error - Dynamic assignment
+      filteredChanges[key] = filtered;
+    }
   }
-  return {
-    url: comparison.url,
-    currentDate: comparison.currentDate,
-    previousDate: comparison.previousDate,
-    currentContentId: comparison.currentContentId,
-    previousContentId: comparison.previousContentId,
-    hasChanges: comparison.hasChanges,
-    changes: filteredChanges,
-    changeScore: comparison.changeScore,
-  };
+  
+  filteredComparison.changes = filteredChanges as ComparisonReturn['changes'];
+  return filteredComparison;
 }
 
 async function runDailyComparison() {
@@ -139,8 +193,8 @@ async function runDailyComparison() {
             
             console.log(`Comparing content for ${url} between ${previousContent.lastScraped.toISOString()} and ${currentContent.lastScraped.toISOString()}`);
             
-            // Compare the content
-            const comparison = compareScrapedContent(previousContent, currentContent);
+            // Compare the content (with type assertion)
+            const comparison = compareScrapedContent(previousContent, currentContent) as unknown as ComparisonReturn;
             
             // Check if there are changes
             if (comparison.hasChanges) {

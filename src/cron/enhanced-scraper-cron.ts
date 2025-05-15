@@ -7,10 +7,33 @@ import dotenv from 'dotenv';
 import { connectToDatabase } from '../lib/utils/tempDB';
 import DataCaptureModel, { DataCaptureType, FormEntry } from '../schemas/data-capture/datacapture.schema';
 import ScrapedContentModel from '../schemas/data-capture/scraped-content.schema';
-import { scrapeEnhancedSeoData, EnhancedScrapedData } from '../pages/platform/datacapture/script/scrapData';
+import { scrapeEnhancedSeoData } from '../pages/platform/datacapture/script/scrapData';
 
 // Load environment variables from .env.local
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+
+/**
+ * Sanitizes Map objects to make them serializable for MongoDB
+ * Converts Map and nested Maps to plain objects
+ */
+function sanitizeMapKeys(data: unknown): unknown {
+  if (data instanceof Map) {
+    const obj: Record<string, unknown> = {};
+    for (const [key, value] of data.entries()) {
+      obj[String(key)] = sanitizeMapKeys(value);
+    }
+    return obj;
+  } else if (Array.isArray(data)) {
+    return data.map(item => sanitizeMapKeys(item));
+  } else if (data !== null && typeof data === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(data as object)) {
+      result[key] = sanitizeMapKeys((data as Record<string, unknown>)[key]);
+    }
+    return result;
+  }
+  return data;
+}
 
 console.log('Starting enhanced website scraper cron job...');
 
