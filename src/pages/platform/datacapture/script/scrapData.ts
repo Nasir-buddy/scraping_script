@@ -39,8 +39,8 @@ interface ScrapedData {
 export interface EnhancedScrapedData extends ScrapedData {
   statusCode: number;
   headers: Record<string, string>;
-  sitemapUrls: string[];
-  robotsTxt: string | null;
+  sitemapUrls?: string[];
+  robotsTxt?: string | null;
   wordCount: number;
   textToHtmlRatio: number;
   metaRobotsTags: {
@@ -736,8 +736,6 @@ export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrape
       // Enhanced data
       statusCode,
       headers: sanitizeMapKeys(headers),
-      sitemapUrls,
-      robotsTxt,
       wordCount,
       textToHtmlRatio,
       metaRobotsTags,

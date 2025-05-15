@@ -160,8 +160,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
                 imageAlts: scrapedData.imageAlts,
                 pageLoadTimeMs: scrapedData.pageLoadTimeMs,
                 statusCode: scrapedData.statusCode,
-                sitemapUrls: scrapedData.sitemapUrls,
-                robotsTxt: scrapedData.robotsTxt,
                 wordCount: scrapedData.wordCount,
                 textToHtmlRatio: scrapedData.textToHtmlRatio,
                 metaRobotsTags: scrapedData.metaRobotsTags,

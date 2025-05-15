@@ -38,8 +38,6 @@ export interface ScrapedContentType extends Document {
   imageAlts?: Array<{ src: string; alt: string }>;
   pageLoadTimeMs?: number;
   statusCode?: number;
-  sitemapUrls?: string[];
-  robotsTxt?: string;
   wordCount?: number;
   textToHtmlRatio?: number;
   metaRobotsTags?: {
@@ -141,8 +139,6 @@ const ScrapedContentSchema: Schema<ScrapedContentType> = new Schema(
     }],
     pageLoadTimeMs: { type: Number },
     statusCode: { type: Number },
-    sitemapUrls: [{ type: String }],
-    robotsTxt: { type: String },
     wordCount: { type: Number },
     textToHtmlRatio: { type: Number },
     metaRobotsTags: {
