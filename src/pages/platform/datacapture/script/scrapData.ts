@@ -1,6 +1,5 @@
 import puppeteer from 'puppeteer';
 import * as cheerio from 'cheerio';
-import axios from 'axios';
 import type { HTTPResponse } from 'puppeteer';
 
 interface ScrapedData {
@@ -39,8 +38,8 @@ interface ScrapedData {
 export interface EnhancedScrapedData extends ScrapedData {
   statusCode: number;
   headers: Record<string, string>;
-  sitemapUrls: string[];
-  robotsTxt: string | null;
+  sitemapUrls?: string[];
+  robotsTxt?: string | null;
   wordCount: number;
   textToHtmlRatio: number;
   metaRobotsTags: {
@@ -354,58 +353,6 @@ function sanitizeMapKeys<T>(obj: Record<string, T>): Record<string, T> {
   return sanitized;
 }
 
-// Add this utility function above the scrapeEnhancedSeoData function
-/**
- * Makes a resilient HTTP request with retries and improved error handling
- * @param url URL to fetch
- * @param options Request options
- * @param method HTTP method to use
- * @param retries Number of retries before giving up
- * @returns Response data or null if failed
- */
-async function resilientRequest<T = unknown>(
-  url: string, 
-  options: Record<string, unknown> = {}, 
-  method: 'get' | 'head' = 'get', 
-  retries: number = 2
-): Promise<T | null> {
-  const defaultOptions = {
-    timeout: 15000,
-    maxRedirects: 5,
-    validateStatus: (status: number) => status < 500, // Accept any status < 500
-  };
-  
-  const finalOptions = { ...defaultOptions, ...options };
-  
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = method === 'get' 
-        ? await axios.get<T>(url, finalOptions)
-        : await axios.head<T>(url, finalOptions);
-      
-      return response.data;
-    } catch (error: unknown) {
-      const isLastAttempt = attempt === retries;
-      
-      // Log differently on final attempt
-      if (isLastAttempt) {
-        console.warn(`🚫 Failed to fetch ${url} after ${retries + 1} attempts:`, 
-          error instanceof Error ? error.message : String(error));
-        return null;
-      } else {
-        console.log(`⚠️ Attempt ${attempt + 1}/${retries + 1} failed for ${url}:`, 
-          error instanceof Error ? error.message : String(error));
-          
-        // Add backoff delay between retries (300ms, 600ms, etc.)
-        const delay = 300 * Math.pow(2, attempt);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-  
-  return null;
-}
-
 export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrapedData> {
   console.log(`==========================================`);
   console.log(`🔍 STARTING ENHANCED SCRAPE: ${url}`);
@@ -562,65 +509,6 @@ export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrape
     // Page load time
     const pageLoadTimeMs = Date.now() - startTime;
     console.log(`📊 Page load time: ${pageLoadTimeMs}ms`);
-    
-    // Get robots.txt
-    console.log(`📊 Fetching robots.txt...`);
-    let robotsTxt: string | null = null;
-    try {
-      const robotsUrl = new URL('/robots.txt', url).href;
-      robotsTxt = await resilientRequest<string>(robotsUrl);
-      if (robotsTxt) {
-        console.log(`📊 Successfully fetched robots.txt (${robotsTxt.length} characters)`);
-      } else {
-        console.log(`📊 No robots.txt available or could not be fetched`);
-      }
-    } catch (error) {
-      console.warn(`⚠️ Could not fetch robots.txt for ${url}:`, error);
-      // Continue without robots.txt data
-    }
-    
-    // Get sitemap URLs
-    console.log(`📊 Looking for sitemap URLs...`);
-    const sitemapUrls: string[] = [];
-    if (robotsTxt) {
-      const sitemapMatches = robotsTxt.match(/^Sitemap:\s*(.+)$/gm);
-      if (sitemapMatches) {
-        sitemapMatches.forEach(match => {
-          const sitemapUrl = match.replace(/^Sitemap:\s*/, '').trim();
-          sitemapUrls.push(sitemapUrl);
-        });
-      }
-    }
-    
-    if (sitemapUrls.length === 0) {
-      // If no sitemap found in robots.txt, try the common locations
-      try {
-        // Try sitemap.xml
-        const sitemapUrl = `${new URL(url).origin}/sitemap.xml`;
-        const sitemapExists = await resilientRequest(sitemapUrl, {}, 'head');
-        
-        if (sitemapExists !== null) {
-          console.log(`✅ Found sitemap.xml for ${url}`);
-          sitemapUrls.push(sitemapUrl);
-        } else {
-          // Try sitemap_index.xml as fallback
-          const sitemapIndexUrl = `${new URL(url).origin}/sitemap_index.xml`;
-          const sitemapIndexExists = await resilientRequest(sitemapIndexUrl, {}, 'head');
-          
-          if (sitemapIndexExists !== null) {
-            console.log(`✅ Found sitemap_index.xml for ${url}`);
-            sitemapUrls.push(sitemapIndexUrl);
-          } else {
-            console.log(`ℹ️ No sitemap found for ${url}, continuing with direct scraping`);
-          }
-        }
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.log(`ℹ️ Error checking for sitemaps for ${url}: ${errorMessage}`);
-        // Don't throw error, just continue with the rest of the scraping
-      }
-    }
-    console.log(`📊 Found ${sitemapUrls.length} sitemap URLs`);
     
     // Count words in the visible text
     console.log(`📊 Analyzing text content...`);
@@ -802,8 +690,6 @@ export async function scrapeEnhancedSeoData(url: string): Promise<EnhancedScrape
       // Enhanced data
       statusCode,
       headers: sanitizeMapKeys(headers),
-      sitemapUrls,
-      robotsTxt,
       wordCount,
       textToHtmlRatio,
       metaRobotsTags,
